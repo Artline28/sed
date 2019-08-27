@@ -1,0 +1,162 @@
+#---------------------------------------------------------------------
+# Example configuration for a possible web application.  See the
+# full configuration options online.
+#
+#   http://haproxy.1wt.eu/download/1.4/doc/configuration.txt
+#
+#---------------------------------------------------------------------
+
+#---------------------------------------------------------------------
+# Global settings
+#---------------------------------------------------------------------
+global
+    # to have these messages end up in /var/log/haproxy.log you will
+    # need to:
+    #
+    # 1) configure syslog to accept network log events.  This is done
+    #    by adding the '-r' option to the SYSLOGD_OPTIONS in
+    #    /etc/sysconfig/syslog
+    #
+    # 2) configure local2 events to go to the /var/log/haproxy.log
+    #   file. A line like the following can be added to
+    #   /etc/sysconfig/syslog
+    #
+    #    local2.*                       /var/log/haproxy.log
+    #
+    log         127.0.0.1 local2
+
+    chroot      /var/lib/haproxy
+    pidfile     /var/run/haproxy.pid
+    #maxconn     4000
+    user        haproxy
+    group       haproxy
+    daemon
+
+    # turn on stats unix socket
+    stats socket /var/lib/haproxy/stats
+
+#---------------------------------------------------------------------
+# common defaults that all the 'listen' and 'backend' sections will
+# use if not designated in their block
+#---------------------------------------------------------------------
+defaults
+    mode                    http
+    log                     global
+    #option                  httplog
+    option                  dontlognull
+    #option http-server-close
+    #option forwardfor       except 127.0.0.0/8
+    option                  redispatch
+    retries                 3
+    timeout http-request    10s
+    timeout queue           1m
+    timeout connect         10s
+    timeout client          1m
+    timeout server          1m
+    timeout http-keep-alive 10s
+    timeout check           10s
+    #maxconn                 3000
+
+listen stats
+        bind :81
+        stats enable
+        stats uri /stats
+        stats auth stats:DigDes
+
+#---------------------------------------------------------------------
+# main frontend which proxys to the backends
+#---------------------------------------------------------------------
+#frontend  main *:5000
+#    acl url_static       path_beg       -i /static /images /javascript /stylesheets
+#    acl url_static       path_end       -i .jpg .gif .png .css .js
+
+#    use_backend static          if url_static
+#    default_backend             app
+
+#####################################################################
+################## S Y N C   S E R V I C E ##########################
+#####################################################################
+
+frontend front::ARM
+        mode tcp
+        bind 192.168.194.31:443
+        bind 192.168.194.31:2012
+        bind 192.168.194.31:8888
+        bind 192.168.194.31:49049
+        acl GOST-2001 dst_port 443
+        acl RSA  dst_port 8888
+        acl GOST-2012 dst_port 2012
+        use_backend back::ARM_GOST-2001 if GOST-2001
+        use_backend back::ARM_GOST-2012 if GOST-2012
+        use_backend back::ARM_RSA if RSA
+        default_backend back::ARM_Test
+
+backend back::ARM_GOST-2001
+        mode tcp
+        balance leastconn
+        stick-table type ip size 10k expire 10m
+        stick on src
+        option ssl-hello-chk
+        #option tcp-check
+        server sed-sync1.nnov.ru 192.168.194.12:443 check port 443 inter 13 rise 5 fall 5
+        server sed-sync2.nnov.ru 192.168.194.13:443 check port 443 inter 13 rise 5 fall 5
+        server sed-sync3.nnov.ru 192.168.194.32:443 check port 443 inter 13 rise 5 fall 5
+
+backend back::ARM_GOST-2012
+        mode tcp
+        balance leastconn
+        stick-table type ip size 10k expire 10m
+        stick on src
+        option ssl-hello-chk
+        #option tcp-check
+        server sed-sync1.nnov.ru 192.168.194.12:2012 check port 2012 inter 33 rise 5 fall 5
+        server sed-sync2.nnov.ru 192.168.194.13:2012 check port 2012 inter 33 rise 5 fall 5
+        server sed-sync3.nnov.ru 192.168.194.32:2012 check port 2012 inter 33 rise 5 fall 5
+
+backend back::ARM_RSA
+        mode tcp
+        balance leastconn
+        stick-table type ip size 10k expire 10m
+        stick on src
+        option ssl-hello-chk
+        #option tcp-check
+        server sed-sync1.nnov.ru 192.168.194.12:8888 check port 8888 inter 17 rise 5 fall 5
+        server sed-sync2.nnov.ru 192.168.194.13:8888 check port 8888 inter 17 rise 5 fall 5
+        server sed-sync3.nnov.ru 192.168.194.32:8888 check port 8888 inter 17 rise 5 fall 5
+
+#####################################################################
+
+#####################################################################
+################## P U S H   S E R V I C E ##########################
+#####################################################################
+
+frontend front::Push
+        mode http
+        bind *:48999
+        default_backend back::Push
+
+backend back::Push
+        mode http
+        balance leastconn
+        option httpchk
+
+        server sed-push1.nnov.ru 192.168.194.48:48999 check port 48999 inter 13 rise 5 fall 5
+        server sed-push2.nnov.ru 192.168.194.55:48999 check port 48999 inter 13 rise 5 fall 5
+
+################# T E S T   C O N F G ################################
+
+frontend front::ARM_Test_49049
+disabled
+        mode tcp
+        bind 192.168.194.31:49049
+        default_backend back::ARM_Test
+
+backend back::ARM_Test
+        mode tcp
+        balance leastconn
+        stick-table type ip size 10k expire 10m
+        stick on src
+        option ssl-hello-chk
+        #option tcp-check
+        server sed-sync1.nnov.ru 192.168.194.12:443 check port 443 inter 123 rise 5 fall 5
+        #server sed-sync3.nnov.ru 192.168.194.32:8888 check port 8888 inter 123 rise 5 fall 5
